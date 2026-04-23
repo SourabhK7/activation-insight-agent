@@ -1,0 +1,119 @@
+{
+  "overall": {
+    "total_users": 50000,
+    "end_to_end_conversion": 0.15956,
+    "step_order": [
+      "landing_page_view",
+      "product_page_view",
+      "add_to_cart",
+      "shipping_info_entered",
+      "payment_info_entered",
+      "purchase_complete"
+    ],
+    "steps": [
+      {
+        "step_name": "landing_page_view",
+        "users_reached": 50000,
+        "users_continued": 35156,
+        "step_conversion": 0.70312,
+        "drop_off": 0.29688000000000003
+      },
+      {
+        "step_name": "product_page_view",
+        "users_reached": 35156,
+        "users_continued": 17429,
+        "step_conversion": 0.4957617476390943,
+        "drop_off": 0.5042382523609057
+      },
+      {
+        "step_name": "add_to_cart",
+        "users_reached": 17429,
+        "users_continued": 13519,
+        "step_conversion": 0.7756612542314534,
+        "drop_off": 0.22433874576854662
+      },
+      {
+        "step_name": "shipping_info_entered",
+        "users_reached": 13519,
+        "users_continued": 8883,
+        "step_conversion": 0.6570752274576522,
+        "drop_off": 0.34292477254234777
+      },
+      {
+        "step_name": "payment_info_entered",
+        "users_reached": 8883,
+        "users_continued": 7978,
+        "step_conversion": 0.8981200045029832,
+        "drop_off": 0.10187999549701676
+      },
+      {
+        "step_name": "purchase_complete",
+        "users_reached": 7978,
+        "users_continued": 7978,
+        "step_conversion": 1.0,
+        "drop_off": 0.0
+      }
+    ],
+    "biggest_drop_off_step": {
+      "step_name": "product_page_view",
+      "users_reached": 35156,
+      "users_continued": 17429,
+      "step_conversion": 0.4957617476390943,
+      "drop_off": 0.5042382523609057
+    }
+  },
+  "divergent_segments": [
+    {
+      "segment_column": "acquisition_source",
+      "segment_value": "paid_social",
+      "segment_n": 9952,
+      "segment_end_to_end": 0.08872588424437299,
+      "overall_end_to_end": 0.15956,
+      "end_to_end_delta_pp": -0.07083411575562702,
+      "direction": "lower",
+      "divergent_steps": [
+        {
+          "step_name": "product_page_view",
+          "segment_conversion": 0.2672254581616707,
+          "overall_conversion": 0.4957617476390943,
+          "delta_pp": -0.2285362894774236
+        },
+        {
+          "step_name": "add_to_cart",
+          "segment_conversion": 0.79585326953748,
+          "overall_conversion": 0.7756612542314534,
+          "delta_pp": 0.020192015306026656
+        }
+      ]
+    },
+    {
+      "segment_column": "device",
+      "segment_value": "desktop",
+      "segment_n": 22554,
+      "segment_end_to_end": 0.20688126274718455,
+      "overall_end_to_end": 0.15956,
+      "end_to_end_delta_pp": 0.04732126274718454,
+      "direction": "higher",
+      "divergent_steps": [
+        {
+          "step_name": "shipping_info_entered",
+          "segment_conversion": 0.8493641995435279,
+          "overall_conversion": 0.6570752274576522,
+          "delta_pp": 0.1922889720858757
+        }
+      ]
+    }
+  ],
+  "attribute_columns_analyzed": [
+    "device",
+    "acquisition_source",
+    "country_code",
+    "signup_week"
+  ],
+  "small_segment_counts": {
+    "device": 0,
+    "acquisition_source": 0,
+    "country_code": 0,
+    "signup_week": 0
+  }
+}
