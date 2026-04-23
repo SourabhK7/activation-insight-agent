@@ -1,4 +1,4 @@
-# Activation Insight Agent
+# User Journey Analytics Agent
 
 A Python agent that ingests e-commerce funnel data, runs cohort analysis, and produces a written diagnosis of where and why users are dropping off.
 
