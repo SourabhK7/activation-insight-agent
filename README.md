@@ -215,4 +215,5 @@ Sonnet is the right quality/cost tradeoff for narrative generation from structur
 
 ## Author
 
-Sourabh Koul — Data Scientist, San Jose CA. [LinkedIn](https://www.linkedin.com/in/sourabhkoul/) · [GitHub](https://github.com/SourabhK7)
+Sourabh Koul — Data Scientist, San Jose CA
+[LinkedIn](https://www.linkedin.com/in/sourabhkoul/) · [GitHub](https://github.com/SourabhK7)
