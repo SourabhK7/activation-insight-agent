@@ -2,22 +2,22 @@
 
 [![test](https://github.com/SourabhK7/activation-insight-agent/actions/workflows/test.yml/badge.svg)](https://github.com/SourabhK7/activation-insight-agent/actions/workflows/test.yml)
 
-A small Python tool that takes a funnel event CSV, works out where users are dropping off, and writes a plain-English diagnosis you can send to a PM.
+A Python analytics agent that turns raw funnel event data into a written diagnosis of where and why users are dropping off. Give it a messy CSV; get back the readout you'd otherwise spend an hour writing yourself.
 
-Given a messy funnel CSV, it aims to produce a readout in about five minutes without you having to write it.
+The architecture is the interesting part: **pandas owns the arithmetic, the LLM owns the narrative**, and the two never mix. That's the design decision the rest of the repo is built around, and — importantly — the one the [`evals/`](evals/) directory exists to measure rather than assert.
 
 ---
 
-## How it's put together
+## Architecture
 
-Two layers, split on purpose:
+Two layers, deliberately separated:
 
-- **Python does the math.** Conversion rates, segment breakdowns, and the search for cohorts that look off from the overall funnel — all pandas. The LLM never sees numbers it has to compute.
-- **The LLM does the writing.** It receives a structured `Findings` object, not the raw CSV, and turns it into a diagnosis with a fixed structure (headline, funnel overview, segments, interpretation, caveats, next steps).
+- **Python does the math.** Conversion rates, segment breakdowns, and the search for cohorts that diverge from the overall funnel — all pandas. The LLM never sees a number it has to compute.
+- **The LLM does the writing.** It receives a structured `Findings` object, not raw events, and produces a diagnosis with a fixed structure: headline, funnel overview, segments, interpretation, caveats, next steps.
 
-This split matters because LLMs are unreliable at arithmetic and reliable at prose. Letting the LLM compute a conversion rate is where these tools go wrong.
+The split isn't arbitrary. LLMs are unreliable at arithmetic and reliable at prose; every conversion rate the LLM computes itself is a place the pipeline can silently lie to a stakeholder. Moving arithmetic to pandas removes that entire class of failure.
 
-A side benefit: the `Findings` object is inspectable. `print(findings.to_dict())` shows exactly what the LLM was given. That makes debugging far easier than an end-to-end LLM pipeline.
+The `Findings` object is inspectable: `print(findings.to_dict())` shows exactly what the LLM was given. That makes this pipeline debuggable in ways an end-to-end "here's the CSV, write me something" prompt is not.
 
 ```
 funnel CSV
