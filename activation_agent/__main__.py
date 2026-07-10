@@ -22,7 +22,6 @@ from .cohorts import find_divergent_segments
 from .findings import Findings
 from .funnel import compute_funnel
 
-
 DEFAULT_STEP_ORDER = [
     "landing_page_view",
     "product_page_view",
@@ -62,10 +61,16 @@ def _build_findings(
 
 
 def cmd_generate_data(args: argparse.Namespace) -> int:
-    df = synthesize.generate(n_users=args.n_users, seed=args.seed)
+    if args.preset == "b2b-trial":
+        df = synthesize.generate_b2b_trial(n_users=args.n_users, seed=args.seed)
+    else:
+        df = synthesize.generate(n_users=args.n_users, seed=args.seed)
     out = Path(args.output)
     synthesize.write(df, out)
-    print(f"Generated {len(df):,} events for {args.n_users:,} users → {out}")
+    print(
+        f"Generated {len(df):,} events for {args.n_users:,} users "
+        f"(preset={args.preset}) -> {out}"
+    )
     return 0
 
 
@@ -87,7 +92,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     # Import lazily so `generate-data` and `analyze` work without the anthropic package.
-    from .diagnose import diagnose, DiagnosisError
+    from .diagnose import DiagnosisError, diagnose
 
     events = pd.read_csv(args.data)
     step_order = args.steps.split(",") if args.steps else DEFAULT_STEP_ORDER
@@ -103,15 +108,23 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     try:
-        diagnosis = diagnose(findings, model=args.model)
+        result = diagnose(findings, model=args.model)
     except DiagnosisError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
     if args.output:
-        Path(args.output).write_text(diagnosis)
+        Path(args.output).write_text(result.text)
         print(f"Diagnosis written to {args.output}", file=sys.stderr)
-    print(diagnosis)
+
+    u = result.usage
+    cost_str = f"~${u.cost_usd:.4f}" if u.cost_usd is not None else "unknown (model not in pricing table)"
+    print(
+        f"Tokens: in={u.input_tokens:,} out={u.output_tokens:,} · cost: {cost_str} · model: {u.model}",
+        file=sys.stderr,
+    )
+
+    print(result.text)
     return 0
 
 
@@ -127,6 +140,14 @@ def main(argv: List[str] | None = None) -> int:
     p_gen.add_argument("--n-users", type=int, default=50000, help="Number of users to simulate.")
     p_gen.add_argument("--seed", type=int, default=42, help="Random seed.")
     p_gen.add_argument("--output", default="data/sample_funnel.csv", help="Output CSV path.")
+    p_gen.add_argument(
+        "--preset",
+        choices=["ecommerce", "b2b-trial"],
+        default="ecommerce",
+        help="Which synthetic funnel shape to generate. 'ecommerce' is the default "
+             "6-step e-commerce checkout; 'b2b-trial' is a B2B SaaS free-trial funnel "
+             "with different attributes (plan_tier, region, initial_seats_claimed).",
+    )
     p_gen.set_defaults(func=cmd_generate_data)
 
     # analyze (no LLM)

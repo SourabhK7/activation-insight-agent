@@ -30,7 +30,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-
 FUNNEL_STEPS = [
     "landing_page_view",
     "product_page_view",
@@ -170,6 +169,137 @@ def write(df: pd.DataFrame, path: Path) -> None:
     """Write the funnel data to CSV."""
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False)
+
+
+# ----------------------------------------------------------------------------
+# B2B trial preset
+# ----------------------------------------------------------------------------
+#
+# A second, different-shaped synthetic funnel modeling a B2B SaaS free-trial
+# → paid conversion. Different funnel steps, different user attributes,
+# different planted patterns. Exists so the agent is demonstrated on more
+# than one dataset shape.
+#
+# Planted patterns:
+#  A) Enterprise-tier trials with fewer than 5 seats claimed by day 3 have a
+#     collapsing paid-conversion rate at the "connect_data_source" step.
+#     Represents the reality that a solo eval of an enterprise product often
+#     fails to reach the point of demonstrating value.
+#  B) Trials that never invite a second teammate underperform at the "run_first_workflow"
+#     step regardless of tier. Represents the collaborative-product activation gap.
+#  C) A subtle regional effect: LATAM trials have modestly elevated drop-off at
+#     "connect_data_source" (proxy for local compliance blockers / SSO friction).
+#     Planted at ~7pp, harder to detect than the e-commerce planted patterns.
+
+B2B_FUNNEL_STEPS = [
+    "trial_started",
+    "invited_teammate",
+    "connect_data_source",
+    "run_first_workflow",
+    "hit_activation_metric",
+    "paid_conversion",
+]
+
+
+@dataclass
+class B2BProfile:
+    user_id: str
+    plan_tier: str          # 'starter' | 'growth' | 'enterprise'
+    region: str             # 'NA' | 'EMEA' | 'LATAM' | 'APAC'
+    initial_seats_claimed: int   # 1..25
+    signup_week: int
+
+
+def _sample_b2b_profile(user_id: str, rng: random.Random) -> B2BProfile:
+    plan_tier = rng.choices(["starter", "growth", "enterprise"], weights=[0.55, 0.30, 0.15])[0]
+    region = rng.choices(["NA", "EMEA", "LATAM", "APAC"], weights=[0.55, 0.25, 0.12, 0.08])[0]
+    if plan_tier == "starter":
+        seats = rng.randint(1, 3)
+    elif plan_tier == "growth":
+        seats = rng.randint(2, 8)
+    else:
+        seats = rng.randint(1, 25)  # enterprise varies widely
+    return B2BProfile(
+        user_id=user_id,
+        plan_tier=plan_tier,
+        region=region,
+        initial_seats_claimed=seats,
+        signup_week=rng.randint(0, 3),
+    )
+
+
+B2B_BASE_CONVERSION = {
+    "trial_started": 1.00,
+    "invited_teammate": 0.60,
+    "connect_data_source": 0.72,
+    "run_first_workflow": 0.75,
+    "hit_activation_metric": 0.65,
+    "paid_conversion": 0.55,
+}
+
+
+def _b2b_step_probability(step: str, profile: B2BProfile, invited_second: bool) -> float:
+    p = B2B_BASE_CONVERSION[step]
+
+    # Pattern A: solo enterprise eval collapse at data-source connect.
+    if step == "connect_data_source" and profile.plan_tier == "enterprise" and profile.initial_seats_claimed < 5:
+        p = max(0.05, p - 0.40)
+
+    # Pattern B: not inviting a teammate → underperformance at first workflow.
+    if step == "run_first_workflow" and not invited_second:
+        p = max(0.05, p - 0.25)
+
+    # Pattern C: LATAM subtle drop at data-source connect.
+    if step == "connect_data_source" and profile.region == "LATAM":
+        p = max(0.05, p - 0.07)
+
+    # Weak weekly noise.
+    if step == "invited_teammate":
+        p = max(0.05, p - 0.02 * profile.signup_week)
+
+    return p
+
+
+def _generate_b2b_journey(profile: B2BProfile, start_time: datetime, rng: random.Random):
+    current_time = start_time
+    invited_second = False
+    for step in B2B_FUNNEL_STEPS:
+        if step != "trial_started":
+            p = _b2b_step_probability(step, profile, invited_second)
+            if rng.random() > p:
+                return
+            delay_h = rng.randint(1, 48)
+            current_time += timedelta(hours=delay_h)
+        if step == "invited_teammate":
+            invited_second = True
+        yield {
+            "user_id": profile.user_id,
+            "step_name": step,
+            "timestamp": current_time.isoformat(),
+            "plan_tier": profile.plan_tier,
+            "region": profile.region,
+            "initial_seats_claimed": profile.initial_seats_claimed,
+            "signup_week": profile.signup_week,
+        }
+
+
+def generate_b2b_trial(n_users: int, seed: int = 42) -> pd.DataFrame:
+    """
+    Generate a synthetic B2B SaaS trial → paid funnel.
+    Different shape from the default e-commerce generator, so the agent is
+    demonstrated on more than one dataset structure. See planted-pattern
+    notes above.
+    """
+    rng = random.Random(seed)
+    np.random.seed(seed)
+    base_time = datetime(2026, 4, 1, 0, 0, 0)
+    rows = []
+    for i in range(n_users):
+        profile = _sample_b2b_profile(f"trial_{i:07d}", rng)
+        offset_days = profile.signup_week * 7 + rng.randint(0, 6)
+        start_time = base_time + timedelta(days=offset_days, hours=rng.randint(0, 23))
+        rows.extend(_generate_b2b_journey(profile, start_time, rng))
+    return pd.DataFrame(rows)
 
 
 if __name__ == "__main__":

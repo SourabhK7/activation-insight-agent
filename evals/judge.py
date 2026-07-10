@@ -23,7 +23,6 @@ from typing import Any, Dict
 
 from anthropic import Anthropic
 
-
 JUDGE_MODEL_DEFAULT = "claude-sonnet-5"
 
 JUDGE_SYSTEM_PROMPT = """You are grading a written funnel-analysis diagnosis against a rubric. You will be given the diagnosis text and the ground truth about what patterns were planted in the underlying synthetic data. Your job is to score six criteria, each 0/1/2, per the rubric supplied in the user prompt.

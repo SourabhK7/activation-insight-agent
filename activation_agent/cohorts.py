@@ -28,11 +28,9 @@ from typing import List
 import pandas as pd
 
 from .funnel import (
-    FunnelSummary,
     compute_funnel,
     compute_funnel_by_segment,
 )
-
 
 MIN_SEGMENT_SIZE = 500
 MIN_CONVERSION_DELTA = 0.04  # 4 percentage points

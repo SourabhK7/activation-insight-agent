@@ -24,7 +24,7 @@ The README claims:
 
 That's a testable claim. This harness tests it.
 
-If Arm A meaningfully outperforms Arm B — especially on criterion 5 — the design thesis is supported by data. If the arms score the same, the design decision doesn't matter and the code could be simplified. Either way, the answer is worth having.
+If Arm A meaningfully outperforms Arm B — especially on criterion 5 — the design assumption holds up under actual measurement. If the arms score the same, the design decision doesn't matter and the code could be simplified. Either way, the answer is worth having.
 
 ## How to run it
 

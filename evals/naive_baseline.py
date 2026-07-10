@@ -28,7 +28,6 @@ from typing import List
 
 import pandas as pd
 
-
 NAIVE_SYSTEM_PROMPT = """You are a senior product data scientist. You will be given aggregated event counts from an e-commerce funnel, and you must produce a written diagnosis of where and why users are dropping off.
 
 Compute conversion rates from the counts. Segment the analysis by the user attributes provided. Identify the biggest drop-off step and any cohorts whose conversion is meaningfully worse than overall.

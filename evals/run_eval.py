@@ -38,12 +38,14 @@ from anthropic import Anthropic
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from activation_agent import synthesize  # noqa: E402
-from activation_agent.__main__ import DEFAULT_ATTRIBUTES, DEFAULT_STEP_ORDER, _build_findings  # noqa: E402
+from activation_agent.__main__ import (  # noqa: E402
+    DEFAULT_ATTRIBUTES,
+    DEFAULT_STEP_ORDER,
+    _build_findings,
+)
 from activation_agent.diagnose import diagnose  # noqa: E402
-
 from evals.judge import JudgeError, score  # noqa: E402
 from evals.naive_baseline import build_naive_prompt  # noqa: E402
-
 
 RESULTS_DIR = Path(__file__).parent / "results"
 RAW_RUNS_PATH = RESULTS_DIR / "raw_runs.jsonl"
@@ -66,14 +68,17 @@ def _compute_ground_truth(events, step_order, attribute_columns) -> Dict[str, An
     return findings.to_dict()
 
 
-def _run_structured_arm(events, findings_dict, model, api_key) -> str:
-    """Arm A: the current design — structured findings JSON → Claude."""
+def _run_structured_arm(events, findings_dict, model, api_key):
+    """Arm A: the current design — structured findings JSON → Claude.
+    Returns (diagnosis_text, usage_dict)."""
     findings = _build_findings(events, DEFAULT_STEP_ORDER, DEFAULT_ATTRIBUTES)
-    return diagnose(findings, model=model, api_key=api_key)
+    result = diagnose(findings, model=model, api_key=api_key)
+    return result.text, result.usage.to_dict()
 
 
-def _run_naive_arm(events, model, api_key) -> str:
-    """Arm B: naive baseline — aggregated counts, LLM computes rates."""
+def _run_naive_arm(events, model, api_key):
+    """Arm B: naive baseline — aggregated counts, LLM computes rates.
+    Returns (diagnosis_text, usage_dict)."""
     system_prompt, user_prompt = build_naive_prompt(
         events, DEFAULT_STEP_ORDER, DEFAULT_ATTRIBUTES
     )
@@ -85,7 +90,15 @@ def _run_naive_arm(events, model, api_key) -> str:
         messages=[{"role": "user", "content": user_prompt}],
     )
     text_parts = [b.text for b in resp.content if hasattr(b, "text")]
-    return "\n".join(text_parts).strip()
+    text = "\n".join(text_parts).strip()
+    in_tok = getattr(resp.usage, "input_tokens", 0)
+    out_tok = getattr(resp.usage, "output_tokens", 0)
+    usage = {
+        "model": model,
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
+    }
+    return text, usage
 
 
 def _append_raw_run(entry: Dict[str, Any]) -> None:
@@ -160,7 +173,7 @@ def _write_latest(summary: Dict[str, Any], n_planned: int, seed_base: int) -> No
         "",
         "## Raw runs",
         "",
-        f"See `results/raw_runs.jsonl` for the full per-run judge output (diagnosis text, scorecard, reasons).",
+        "See `results/raw_runs.jsonl` for the full per-run judge output (diagnosis text, scorecard, reasons).",
         "",
         "## What the numbers mean",
         "",
@@ -196,13 +209,15 @@ def run_one(
 
     try:
         if arm == ARM_STRUCTURED:
-            diagnosis_text = _run_structured_arm(events, ground_truth, diagnosis_model, api_key)
+            diagnosis_text, arm_usage = _run_structured_arm(events, ground_truth, diagnosis_model, api_key)
         elif arm == ARM_NAIVE:
-            diagnosis_text = _run_naive_arm(events, diagnosis_model, api_key)
+            diagnosis_text, arm_usage = _run_naive_arm(events, diagnosis_model, api_key)
         else:
             raise ValueError(f"unknown arm: {arm}")
     except Exception as e:
         return {**row_base, "status": "arm_failed", "error": str(e)}
+
+    row_base["arm_usage"] = arm_usage
 
     try:
         scorecard = score(

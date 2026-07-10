@@ -25,8 +25,7 @@ Design notes:
 from __future__ import annotations
 
 import json
-from typing import Dict, Any
-
+from typing import Any, Dict
 
 SYSTEM_PROMPT = """You are a senior product data scientist writing up the results of a funnel analysis. Your job is to turn a structured findings object into a clear, calibrated written diagnosis that a PM or product lead could act on.
 

@@ -6,7 +6,6 @@ import pandas as pd
 
 from activation_agent.cohorts import find_divergent_segments
 
-
 STEPS = ["step_1", "step_2", "step_3"]
 
 

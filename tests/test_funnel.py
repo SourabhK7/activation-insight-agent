@@ -7,7 +7,6 @@ import pytest
 
 from activation_agent.funnel import compute_funnel, compute_funnel_by_segment
 
-
 STEPS = ["step_1", "step_2", "step_3"]
 
 
