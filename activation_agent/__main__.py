@@ -145,7 +145,7 @@ def main(argv: List[str] | None = None) -> int:
     p_run.add_argument("--output", help="Output markdown path for the diagnosis.")
     p_run.add_argument(
         "--model",
-        default="claude-sonnet-4-5",
+        default="claude-sonnet-5",
         help="Anthropic model to use. Check docs.claude.com for current model IDs.",
     )
     p_run.set_defaults(func=cmd_run)

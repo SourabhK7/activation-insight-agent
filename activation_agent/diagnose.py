@@ -15,7 +15,7 @@ from .findings import Findings
 from .prompts import build_prompt
 
 
-DEFAULT_MODEL = "claude-sonnet-4-5"
+DEFAULT_MODEL = "claude-sonnet-5"
 DEFAULT_MAX_TOKENS = 2000
 
 

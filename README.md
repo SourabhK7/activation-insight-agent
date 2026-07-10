@@ -213,6 +213,21 @@ Sonnet is the right quality/cost tradeoff for narrative generation from structur
 
 ---
 
+## Does the design decision actually work?
+
+The claim "Python does math, LLM does prose" is testable. See [`evals/`](evals/) for an A/B evaluation that pits the structured pipeline (Arm A) against a fair naive baseline (Arm B: same aggregated counts, LLM computes rates itself), scores both with an LLM-judge rubric ([`evals/rubric.md`](evals/rubric.md)), and reports mean and variance across N runs.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+python evals/run_eval.py --n 10
+```
+
+Results land in [`evals/results/latest.md`](evals/results/latest.md) with per-criterion breakdowns. The most interesting criterion is #5 (numerical accuracy) — the direct test of whether letting the LLM compute conversion rates is actually the failure mode the structured design is meant to prevent.
+
+If Arm A doesn't meaningfully beat Arm B in the results, the design decision is wrong and the code should be simplified. If it does, we have data, not vibes.
+
+---
+
 ## Author
 
 Sourabh Koul — Data Scientist, San Jose CA
