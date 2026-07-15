@@ -137,10 +137,14 @@ def score(
     try:
         resp = client.messages.create(
             model=model,
-            # Generous ceiling — the judge writes six reason strings plus the
-            # JSON scaffolding, and extended-reasoning models can burn a lot
-            # of the budget on internal thinking. Observed: 1500 truncated.
-            max_tokens=4000,
+            # Judge output budget scales with the diagnosis it has to grade —
+            # long diagnoses (e.g. 4-5k chars from the naive baseline arm)
+            # require heavier reasoning to check numerical accuracy against
+            # ground truth, and extended-reasoning models exhaust the ceiling
+            # on internal thinking before writing JSON. Observed:
+            # 1500 truncated; 4000 handled structured but not naive; 8000
+            # covers both. Only tokens actually used are billed.
+            max_tokens=8000,
             system=JUDGE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
         )
