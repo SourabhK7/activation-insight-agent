@@ -6,10 +6,12 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+.ruff_cache/
 
 # Env files (NEVER commit API keys)
 .env
 .env.local
+.env.*
 
 # IDE
 .idea/
@@ -20,6 +22,5 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Large generated data (keep the small sample_funnel.csv; ignore anything bigger)
+# Generated data (regenerate with `python -m activation_agent generate-data`)
 data/*.csv
-!data/sample_funnel.csv

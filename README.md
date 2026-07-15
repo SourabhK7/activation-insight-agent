@@ -91,6 +91,8 @@ Two other subcommands:
 - `analyze` — runs only the pandas layer and prints the `Findings` JSON. No LLM call, no API key needed. Good for inspecting what the LLM would receive.
 - `generate-data --preset b2b-trial` — a differently-shaped funnel (see the B2B walkthrough).
 
+Both `analyze` and `run` accept `--detection-mode threshold|statistical` (default: `threshold`). Statistical mode adds a Bonferroni-corrected two-proportion z-test on top of the magnitude gate — see the notes at the bottom of this README for what that means and when to use it.
+
 ---
 
 ## Using it on your own data
@@ -168,7 +170,7 @@ activation-insight-agent/
 
 **Why a structured `Findings` object instead of passing raw CSV to the LLM?** Because the LLM would then have to compute aggregates, which it does unreliably. A structured intermediate also keeps the prompt small enough to stay well under context limits on huge funnels.
 
-**Why detect divergent segments with a simple threshold rather than a proper statistical test?** The prototype uses `|segment_rate − overall_rate| > 4pp AND segment_n > 500`. A production tool should use a proportion z-test with Bonferroni correction. This is intentionally simple because (a) the agent's output is a starting point for human review, not a final decision, and (b) adding statistical rigor is a real project, not an afternoon. See `cohorts.py` for the precise rule.
+**Threshold vs. statistical detection of divergent segments.** Two modes ship. The default (`--detection-mode threshold`) uses `|segment_rate − overall_rate| > 4pp AND segment_n > 500` — simple, easy to explain in the diagnosis, hard to misuse. The opt-in `--detection-mode statistical` mode adds a two-proportion z-test between the segment and the rest of the population and requires the resulting p-value to clear a Bonferroni-corrected alpha (alpha / N, where N is the total count of size-passing segments scanned in the call). Statistical mode never flags *more* segments than threshold mode — it can only remove candidates that fail significance. That makes it safe to enable: worst case, the diagnosis gets shorter.
 
 **Why synthetic data?** Public event-level funnel data with permissive licensing is hard to come by, and synthesizing lets you plant known patterns. Planting known patterns means you can check whether the agent surfaces what's actually there instead of inventing stories from noise. Real data would not allow this check.
 

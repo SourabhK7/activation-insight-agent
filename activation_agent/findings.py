@@ -50,6 +50,10 @@ class Findings:
                     "end_to_end_delta_pp": seg.end_to_end_delta_pp,
                     "direction": seg.divergence_direction,
                     "divergent_steps": [asdict(sd) for sd in seg.divergent_steps],
+                    # Populated only when statistical detection mode ran. In
+                    # threshold mode both are null (significance was not tested).
+                    "p_value": seg.p_value,
+                    "statistically_significant": seg.is_statistically_significant,
                 }
                 for seg in self.divergent_segments
             ],

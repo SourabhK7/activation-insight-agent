@@ -38,9 +38,13 @@ def _build_findings(
     events: pd.DataFrame,
     step_order: List[str],
     attribute_columns: List[str],
+    *,
+    detection_mode: str = "threshold",
 ) -> Findings:
     overall = compute_funnel(events, step_order)
-    divergent = find_divergent_segments(events, step_order, attribute_columns)
+    divergent = find_divergent_segments(
+        events, step_order, attribute_columns, detection_mode=detection_mode
+    )
 
     # Count segments that were too small per attribute, for context.
     small_counts: dict[str, int] = {}
@@ -79,7 +83,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     step_order = args.steps.split(",") if args.steps else DEFAULT_STEP_ORDER
     attrs = args.attributes.split(",") if args.attributes else DEFAULT_ATTRIBUTES
 
-    findings = _build_findings(events, step_order, attrs)
+    findings = _build_findings(events, step_order, attrs, detection_mode=args.detection_mode)
     out_dict = findings.to_dict()
 
     if args.output:
@@ -98,8 +102,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     step_order = args.steps.split(",") if args.steps else DEFAULT_STEP_ORDER
     attrs = args.attributes.split(",") if args.attributes else DEFAULT_ATTRIBUTES
 
-    print(f"Analyzing {len(events):,} events...", file=sys.stderr)
-    findings = _build_findings(events, step_order, attrs)
+    print(f"Analyzing {len(events):,} events (detection={args.detection_mode})...", file=sys.stderr)
+    findings = _build_findings(events, step_order, attrs, detection_mode=args.detection_mode)
     print(
         f"Found {len(findings.divergent_segments)} divergent segments across "
         f"{len(findings.attribute_columns_analyzed)} attributes. "
@@ -156,6 +160,14 @@ def main(argv: List[str] | None = None) -> int:
     p_an.add_argument("--steps", help="Comma-separated funnel step order.")
     p_an.add_argument("--attributes", help="Comma-separated attribute columns for segmentation.")
     p_an.add_argument("--output", help="Output JSON path. If omitted, prints to stdout.")
+    p_an.add_argument(
+        "--detection-mode",
+        choices=["threshold", "statistical"],
+        default="threshold",
+        help="How to flag divergent segments. 'threshold' (default) uses a fixed "
+             "4pp magnitude gate. 'statistical' also requires a two-proportion "
+             "z-test to clear a Bonferroni-corrected alpha across all segments scanned.",
+    )
     p_an.set_defaults(func=cmd_analyze)
 
     # run (full pipeline)
@@ -168,6 +180,14 @@ def main(argv: List[str] | None = None) -> int:
         "--model",
         default="claude-sonnet-5",
         help="Anthropic model to use. Check docs.claude.com for current model IDs.",
+    )
+    p_run.add_argument(
+        "--detection-mode",
+        choices=["threshold", "statistical"],
+        default="threshold",
+        help="How to flag divergent segments. 'threshold' (default) uses a fixed "
+             "4pp magnitude gate. 'statistical' also requires a two-proportion "
+             "z-test to clear a Bonferroni-corrected alpha across all segments scanned.",
     )
     p_run.set_defaults(func=cmd_run)
 
