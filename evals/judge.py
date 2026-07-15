@@ -137,7 +137,10 @@ def score(
     try:
         resp = client.messages.create(
             model=model,
-            max_tokens=1500,
+            # Generous ceiling — the judge writes six reason strings plus the
+            # JSON scaffolding, and extended-reasoning models can burn a lot
+            # of the budget on internal thinking. Observed: 1500 truncated.
+            max_tokens=4000,
             system=JUDGE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
         )

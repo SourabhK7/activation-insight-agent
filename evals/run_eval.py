@@ -85,7 +85,9 @@ def _run_naive_arm(events, model, api_key):
     client = Anthropic(api_key=api_key)
     resp = client.messages.create(
         model=model,
-        max_tokens=2000,
+        # Match diagnose.py default. Undersizing this makes the naive arm
+        # return empty text on extended-reasoning models — see diagnose.py.
+        max_tokens=4000,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
     )

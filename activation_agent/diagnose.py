@@ -34,7 +34,9 @@ from .findings import Findings
 from .prompts import build_prompt
 
 DEFAULT_MODEL = "claude-sonnet-5"
-DEFAULT_MAX_TOKENS = 2000
+# Set generously so extended-reasoning models (Sonnet 5+) don't burn the entire
+# budget on internal thinking and return empty text. Observed: 2000 was too low.
+DEFAULT_MAX_TOKENS = 4000
 
 # USD per million tokens. Update when pricing changes; check docs.claude.com
 # for current numbers. These are used only for the human-readable cost
