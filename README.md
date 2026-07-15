@@ -120,13 +120,19 @@ python -m activation_agent run \
 
 ## Does the design assumption hold?
 
-The claim that pre-computing rates in pandas is better than letting the LLM do the arithmetic is testable. The [`evals/`](evals/) directory has an A/B evaluation — same synthetic data, two prompt strategies (structured findings vs. aggregated counts with LLM computing rates), scored by an LLM judge against a 6-criterion rubric that includes numerical accuracy.
+The claim that pre-computing rates in pandas is better than letting the LLM do the arithmetic is testable, so I tested it. The [`evals/`](evals/) directory contains an A/B evaluation: same synthetic data, two prompt strategies (structured findings vs. aggregated counts with the LLM computing rates itself), scored by an LLM judge against a six-criterion rubric that includes numerical accuracy explicitly.
+
+**The result was surprising.** On this task with Sonnet 5, both arms scored 2.00/2.00 (perfect) on numerical accuracy. The narrow "LLMs will silently produce wrong numbers" claim is not supported by measurement — the reasoning model handles the arithmetic. The naive baseline also scored higher on total (11.75 vs 7.33) when the judge succeeded, because its longer diagnoses surfaced more of the planted patterns.
+
+The structured design is still worth keeping — it's more predictable, cheaper (shorter prompts, less reasoning cost), and the intermediate `Findings` object is inspectable in a way an end-to-end prompt is not. But the pitch changes: **the value is determinism and debuggability, not protection against arithmetic errors on frontier models**.
+
+Full write-up with per-criterion scores, caveats, and raw per-run data: [`evals/results/latest.md`](evals/results/latest.md). To reproduce:
 
 ```bash
 python evals/run_eval.py --n 10
 ```
 
-Results land in `evals/results/latest.md`. If the structured pipeline doesn't win on numerical accuracy specifically, the design should be simplified. See [`evals/README.md`](evals/README.md) for how to run and interpret it.
+See [`evals/README.md`](evals/README.md) for the rubric, methodology, and honest limitations of LLM-as-judge on this kind of task.
 
 ---
 
