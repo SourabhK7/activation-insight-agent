@@ -46,12 +46,15 @@ class Findings:
                     "segment_value": seg.segment_value,
                     "segment_n": seg.segment_n,
                     "segment_end_to_end": seg.segment_end_to_end,
-                    "overall_end_to_end": seg.overall_end_to_end,
+                    "rest_end_to_end": seg.rest_end_to_end,
                     "end_to_end_delta_pp": seg.end_to_end_delta_pp,
                     "direction": seg.divergence_direction,
                     "divergent_steps": [asdict(sd) for sd in seg.divergent_steps],
-                    # Populated only when statistical detection mode ran. In
-                    # threshold mode both are null (significance was not tested).
+                    # The subset the LLM should center its narrative on.
+                    # Empty when this segment has no step where it does worse
+                    # than the rest of the population.
+                    "underperforming_steps": [asdict(sd) for sd in seg.underperforming_steps],
+                    # Populated only when statistical detection mode ran.
                     "p_value": seg.p_value,
                     "statistically_significant": seg.is_statistically_significant,
                 }

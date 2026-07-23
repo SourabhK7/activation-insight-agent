@@ -166,3 +166,102 @@ def test_threshold_mode_leaves_p_value_none():
         assert seg.p_value is None
         assert seg.bonferroni_alpha is None
         assert seg.is_statistically_significant is False
+
+
+# ---------------------------------------------------------------------------
+# Vs-rest delta and underperforming_steps
+# ---------------------------------------------------------------------------
+
+
+def _events_with_majority_underperformer(n_bad: int, n_good: int) -> pd.DataFrame:
+    """
+    Build events where 'mobile' is the MAJORITY segment and drops at step_2,
+    while 'desktop' (minority) sails through. Under the old segment-vs-overall
+    delta, mobile's delta would be small (because mobile pulls the aggregate
+    toward itself). Under segment-vs-rest, mobile's delta should be large.
+    """
+    rows = []
+    # Mobile: reaches step_1 and stops (0% end-to-end).
+    for i in range(n_bad):
+        uid = f"m{i}"
+        rows.append((uid, "step_1", "2026-01-01T00:00:00", "mobile"))
+    # Desktop: 100% conversion end-to-end.
+    for i in range(n_good):
+        uid = f"d{i}"
+        rows.append((uid, "step_1", "2026-01-01T00:00:00", "desktop"))
+        rows.append((uid, "step_2", "2026-01-01T00:01:00", "desktop"))
+        rows.append((uid, "step_3", "2026-01-01T00:02:00", "desktop"))
+    return pd.DataFrame(rows, columns=["user_id", "step_name", "timestamp", "device"])
+
+
+def test_delta_is_computed_vs_rest_not_vs_overall():
+    """
+    With 800 mobile (majority) at 0% and 200 desktop (minority) at 100%:
+    - Old delta (vs. overall 20%): mobile = -20pp, desktop = +80pp
+    - New delta (vs. rest):       mobile = -100pp, desktop = +100pp
+    The new comparison makes the actionable segment (mobile) at least as
+    prominent as the minority segment, not less.
+    """
+    events = _events_with_majority_underperformer(n_bad=800, n_good=200)
+    segments = find_divergent_segments(
+        events, STEPS, attribute_columns=["device"], min_segment_size=100,
+    )
+    by_value = {s.segment_value: s for s in segments}
+    assert "mobile" in by_value and "desktop" in by_value
+    # Mobile is 0% end-to-end; rest (desktop) is 100%. Delta must be -1.0.
+    assert abs(by_value["mobile"].end_to_end_delta_pp - (-1.0)) < 1e-6, (
+        f"mobile delta = {by_value['mobile'].end_to_end_delta_pp}, expected -1.0"
+    )
+    # Desktop is 100%; rest (mobile) is 0%. Delta must be +1.0.
+    assert abs(by_value["desktop"].end_to_end_delta_pp - 1.0) < 1e-6
+    # And rest_end_to_end should reflect the opposite segment, not the aggregate.
+    assert abs(by_value["mobile"].rest_end_to_end - 1.0) < 1e-6
+    assert abs(by_value["desktop"].rest_end_to_end - 0.0) < 1e-6
+
+
+def test_underperforming_steps_only_contains_deficits():
+    """Underperforming_steps must only include steps where the segment does
+    WORSE than the rest, sorted most-negative first."""
+    events = _events_with_majority_underperformer(n_bad=800, n_good=200)
+    segments = find_divergent_segments(
+        events, STEPS, attribute_columns=["device"], min_segment_size=100,
+    )
+    by_value = {s.segment_value: s for s in segments}
+    # Mobile drops at step_1 -> step_2. underperforming_steps must be non-empty
+    # and every entry must have negative delta.
+    mobile = by_value["mobile"]
+    assert len(mobile.underperforming_steps) >= 1
+    for sd in mobile.underperforming_steps:
+        assert sd.delta_pp < 0
+    # Most negative first.
+    deltas = [sd.delta_pp for sd in mobile.underperforming_steps]
+    assert deltas == sorted(deltas)
+
+
+def test_underperforming_steps_empty_when_segment_only_outperforms():
+    """A segment that BEATS the rest at every step should have no
+    underperforming_steps. Desktop is that segment in this fixture."""
+    events = _events_with_majority_underperformer(n_bad=800, n_good=200)
+    segments = find_divergent_segments(
+        events, STEPS, attribute_columns=["device"], min_segment_size=100,
+    )
+    by_value = {s.segment_value: s for s in segments}
+    desktop = by_value["desktop"]
+    assert desktop.underperforming_steps == []
+
+
+def test_segment_that_is_entire_population_is_skipped():
+    """When only one segment exists at all, 'rest' is empty and comparison
+    is undefined. Such a segment must not appear in results."""
+    # All 1000 users are 'desktop' — nobody else.
+    rows = []
+    for i in range(1000):
+        uid = f"d{i}"
+        rows.append((uid, "step_1", "2026-01-01T00:00:00", "desktop"))
+        rows.append((uid, "step_2", "2026-01-01T00:01:00", "desktop"))
+        rows.append((uid, "step_3", "2026-01-01T00:02:00", "desktop"))
+    events = pd.DataFrame(rows, columns=["user_id", "step_name", "timestamp", "device"])
+    segments = find_divergent_segments(
+        events, STEPS, attribute_columns=["device"], min_segment_size=100,
+    )
+    assert segments == []

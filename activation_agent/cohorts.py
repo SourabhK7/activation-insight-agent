@@ -1,33 +1,40 @@
 """
 Cohort / segment divergence detection.
 
-Finds segments whose funnel behavior diverges from the overall population
-in ways large enough to be interesting. The goal is NOT to flag every
-statistically significant difference — it's to surface the 3-5 segments
-a product DS would actually want to look at.
+Finds segments whose funnel behavior diverges from the REST of the
+population in ways large enough to be interesting. The goal is NOT to
+flag every statistically significant difference — it's to surface the
+3-5 segments a product DS would actually want to look at.
 
 Two detection modes:
 
 - ``threshold`` (default): a segment is flagged if
-  |segment_end_to_end - overall_end_to_end| >= MIN_CONVERSION_DELTA
+  |segment_end_to_end - rest_end_to_end| >= MIN_CONVERSION_DELTA
   and the segment has at least MIN_SEGMENT_SIZE users at the first step.
-  Simple, easy to explain in the diagnosis, hard to misuse.
 
 - ``statistical`` (opt-in): the practical-magnitude gate above still
   applies, AND a two-proportion z-test between the segment and the rest
   of the population must clear a Bonferroni-corrected significance bar
   (alpha / N, where N is the total count of size-passing segments
-  scanned in this call). This is what lets you distinguish "500 users,
-  4pp gap, could be noise" from "50,000 users, 4pp gap, essentially
-  certain to be real."
+  scanned in this call).
 
-Statistical mode never flags MORE than threshold mode — it can only
-remove candidates that fail the significance bar. That means turning
-it on is safe: worst case, the diagnosis gets shorter.
+Delta convention (important):
+  Deltas are computed as SEGMENT vs. REST-OF-POPULATION, not segment
+  vs. the aggregate-that-includes-the-segment. This matters when the
+  divergent segment is a large share of users: segment-vs-aggregate
+  understates the gap because the segment pulls the aggregate toward
+  itself. Comparing to "everyone else" is the honest question a DS
+  actually wants answered.
 
-Per divergent segment, we also identify which step(s) explain the
-divergence by comparing step-by-step conversion. Step-level divergences
-are descriptive (not a gate) in both modes.
+Framing for the LLM:
+  Each DivergentSegment carries two step-level lists:
+  - ``divergent_steps`` — every step where |seg - rest| >= 2pp,
+    ranked by absolute magnitude. Both directions included.
+  - ``underperforming_steps`` — the subset where the segment does
+    WORSE than the rest, ranked by how much worse (most negative first).
+    This is what the LLM should center its narrative on. Describing a
+    minority segment's "advantage" is rarely actionable; describing the
+    complementary segment's "deficit" almost always is.
 """
 
 from __future__ import annotations
@@ -61,14 +68,9 @@ def _norm_cdf(z: float) -> float:
 
 
 def _two_proportion_z_test(a_success: int, a_n: int, b_success: int, b_n: int) -> float:
-    """
-    Two-sided z-test for equality of two proportions (pooled variance).
-    Returns a two-sided p-value.
-
-    Edge cases:
-      - Either group empty → p = 1.0 (no evidence).
-      - Both proportions equal AND standard error is zero → p = 1.0.
-    """
+    """Two-sided z-test for equality of two proportions (pooled variance).
+    Returns a two-sided p-value. Edge cases: empty group or matching proportions
+    with zero variance return 1.0 (no evidence) or 0.0 as appropriate."""
     if a_n == 0 or b_n == 0:
         return 1.0
     p_a = a_success / a_n
@@ -91,8 +93,8 @@ def _two_proportion_z_test(a_success: int, a_n: int, b_success: int, b_n: int) -
 class StepDivergence:
     step_name: str
     segment_conversion: float
-    overall_conversion: float
-    delta_pp: float  # segment - overall, in absolute percentage points
+    rest_conversion: float  # was overall_conversion; now the rest-of-population rate
+    delta_pp: float  # segment - rest, in absolute percentage points
 
 
 @dataclass
@@ -101,10 +103,10 @@ class DivergentSegment:
     segment_value: str
     segment_n: int
     segment_end_to_end: float
-    overall_end_to_end: float
-    end_to_end_delta_pp: float
-    divergent_steps: List[StepDivergence] = field(default_factory=list)  # ranked by |delta_pp| desc
-    # Populated only in statistical detection mode; None in threshold mode.
+    rest_end_to_end: float  # was overall_end_to_end; now the rest-of-population rate
+    end_to_end_delta_pp: float  # segment - rest, in absolute pp
+    divergent_steps: List[StepDivergence] = field(default_factory=list)
+    underperforming_steps: List[StepDivergence] = field(default_factory=list)
     p_value: Optional[float] = None
     bonferroni_alpha: Optional[float] = None
 
@@ -114,11 +116,6 @@ class DivergentSegment:
 
     @property
     def is_statistically_significant(self) -> bool:
-        """
-        True only if p_value and bonferroni_alpha are set (statistical mode ran)
-        AND the p-value is strictly below the corrected alpha. In threshold mode
-        this always returns False, because significance was not tested.
-        """
         return (
             self.p_value is not None
             and self.bonferroni_alpha is not None
@@ -129,6 +126,11 @@ class DivergentSegment:
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
+
+def _step_counts(funnel_summary) -> dict[str, tuple[int, int]]:
+    """Return {step_name: (users_reached, users_continued)} from a FunnelSummary."""
+    return {s.step_name: (s.users_reached, s.users_continued) for s in funnel_summary.steps}
 
 
 def find_divergent_segments(
@@ -143,30 +145,18 @@ def find_divergent_segments(
     detection_mode: DetectionMode = "threshold",
     alpha: float = DEFAULT_ALPHA,
 ) -> List[DivergentSegment]:
-    """
-    Scan each attribute column for segments with divergent end-to-end conversion.
+    """Scan each attribute column for segments whose funnel behavior diverges
+    from the rest of the population.
 
-    In ``threshold`` mode (default), a segment is returned if its end-to-end
-    conversion differs from overall by at least ``min_conversion_delta``.
-
-    In ``statistical`` mode, the same practical gate applies, AND a two-proportion
-    z-test between the segment and the rest of the population must produce a
-    p-value below ``alpha / N``, where ``N`` is the total number of size-passing
-    segments scanned across all attribute columns in this call (Bonferroni
-    correction). Segments that pass the magnitude gate but fail significance are
-    dropped.
-
-    Returned segments are sorted by absolute magnitude of end-to-end divergence,
-    largest first. Direction (higher or lower than overall) is preserved.
+    Returns segments sorted by absolute magnitude of end-to-end divergence,
+    largest first. See module docstring for the delta convention and the
+    difference between divergent_steps and underperforming_steps.
     """
     overall = compute_funnel(events, step_order, user_col=user_col, step_col=step_col)
-    overall_step_conversions = {s.step_name: s.step_conversion for s in overall.steps}
-
-    # Successes at the final step, for the two-proportion test's oracle counts.
+    overall_step_counts = _step_counts(overall)
     overall_success = int(round(overall.total_users * overall.end_to_end_conversion))
 
     # First pass: gather every size-passing candidate.
-    # (attr, seg_value, seg_funnel, delta)
     candidates: List[tuple] = []
     for attr in attribute_columns:
         if attr not in events.columns:
@@ -180,50 +170,68 @@ def find_divergent_segments(
             min_segment_size=min_segment_size,
         )
         for seg_value, seg_funnel in segment_funnels.items():
-            delta = seg_funnel.end_to_end_conversion - overall.end_to_end_conversion
-            candidates.append((attr, seg_value, seg_funnel, delta))
+            # Rest-of-population arithmetic at end-to-end level.
+            seg_n = seg_funnel.total_users
+            seg_success = int(round(seg_n * seg_funnel.end_to_end_conversion))
+            rest_n = overall.total_users - seg_n
+            if rest_n <= 0:
+                # This segment IS the entire population. There is no "rest"
+                # to compare against, so divergence is undefined. Skip.
+                continue
+            rest_success = overall_success - seg_success
+            rest_e2e = rest_success / rest_n
+            delta = seg_funnel.end_to_end_conversion - rest_e2e
+            candidates.append((attr, seg_value, seg_funnel, delta, rest_e2e, seg_success, rest_n, rest_success))
 
-    # Bonferroni denominator = number of tests we would perform. We compute
-    # this over ALL size-passing candidates, not only those that also pass
-    # the magnitude gate — the false-positive risk is over the whole scan.
     n_tests = max(1, len(candidates))
     bonferroni_alpha = alpha / n_tests if detection_mode == "statistical" else None
 
     divergent: List[DivergentSegment] = []
 
-    for attr, seg_value, seg_funnel, delta in candidates:
-        # Practical-magnitude gate applies in both modes.
+    for (attr, seg_value, seg_funnel, delta, rest_e2e,
+         seg_success, rest_n, rest_success) in candidates:
+        # Practical-magnitude gate in both modes.
         if abs(delta) < min_conversion_delta:
             continue
 
         p_val: Optional[float] = None
         if detection_mode == "statistical":
-            seg_n = seg_funnel.total_users
-            seg_success = int(round(seg_n * seg_funnel.end_to_end_conversion))
-            rest_n = overall.total_users - seg_n
-            rest_success = overall_success - seg_success
-            p_val = _two_proportion_z_test(seg_success, seg_n, rest_success, rest_n)
-            # Statistical mode's second gate.
+            p_val = _two_proportion_z_test(seg_success, seg_funnel.total_users, rest_success, rest_n)
             if p_val >= bonferroni_alpha:  # type: ignore[operator]
                 continue
 
-        # Per-segment step-level divergences (descriptive only, both modes).
+        # Step-level divergences: compute segment vs rest at each step.
+        seg_step_counts = _step_counts(seg_funnel)
         step_divs: List[StepDivergence] = []
-        for step_metrics in seg_funnel.steps[:-1]:  # skip terminal
-            overall_rate = overall_step_conversions.get(step_metrics.step_name)
-            if overall_rate is None:
+        for step_name in step_order[:-1]:  # skip terminal step
+            if step_name not in overall_step_counts or step_name not in seg_step_counts:
                 continue
-            step_delta = step_metrics.step_conversion - overall_rate
-            if abs(step_delta) >= 0.02:  # ≥ 2pp step-level difference
+            overall_reached, overall_continued = overall_step_counts[step_name]
+            seg_reached, seg_continued = seg_step_counts[step_name]
+            rest_reached_step = overall_reached - seg_reached
+            rest_continued_step = overall_continued - seg_continued
+            if rest_reached_step <= 0 or seg_reached <= 0:
+                continue
+            seg_rate = seg_continued / seg_reached
+            rest_rate = rest_continued_step / rest_reached_step
+            step_delta = seg_rate - rest_rate
+            if abs(step_delta) >= 0.02:  # >= 2pp step-level difference
                 step_divs.append(
                     StepDivergence(
-                        step_name=step_metrics.step_name,
-                        segment_conversion=step_metrics.step_conversion,
-                        overall_conversion=overall_rate,
+                        step_name=step_name,
+                        segment_conversion=seg_rate,
+                        rest_conversion=rest_rate,
                         delta_pp=step_delta,
                     )
                 )
         step_divs.sort(key=lambda sd: abs(sd.delta_pp), reverse=True)
+
+        # The subset that matters most for framing: where THIS segment
+        # is dropping harder than the rest. Sorted most-negative first.
+        underperforming = sorted(
+            [sd for sd in step_divs if sd.delta_pp < 0],
+            key=lambda sd: sd.delta_pp,
+        )
 
         divergent.append(
             DivergentSegment(
@@ -231,9 +239,10 @@ def find_divergent_segments(
                 segment_value=seg_value,
                 segment_n=seg_funnel.total_users,
                 segment_end_to_end=seg_funnel.end_to_end_conversion,
-                overall_end_to_end=overall.end_to_end_conversion,
+                rest_end_to_end=rest_e2e,
                 end_to_end_delta_pp=delta,
                 divergent_steps=step_divs,
+                underperforming_steps=underperforming,
                 p_value=p_val,
                 bonferroni_alpha=bonferroni_alpha,
             )
