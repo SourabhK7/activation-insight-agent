@@ -325,7 +325,8 @@ def generate_retention_data(
         the returned signups include some users too young for D30 so the
         `has_complete_window` flag has real work to do downstream.
     """
-    from datetime import date as _date, timedelta as _td
+    from datetime import date as _date
+    from datetime import timedelta as _td
     rng = np.random.default_rng(seed)
     pull = data_pull_date or _date(2026, 6, 15)
 
