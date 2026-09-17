@@ -46,7 +46,8 @@ MODEL_PRICING_PER_MTOK = {
     # current docs before quoting these numbers to a stakeholder.
     "claude-sonnet-5": {"input": 3.00, "output": 15.00},
     "claude-sonnet-4-5": {"input": 3.00, "output": 15.00},
-    "claude-opus-4-8": {"input": 15.00, "output": 75.00},
+    "claude-opus-5": {"input": 15.00, "output": 75.00},
+    "claude-opus-4-1": {"input": 15.00, "output": 75.00},
     "claude-haiku-4-5-20251001": {"input": 1.00, "output": 5.00},
 }
 
