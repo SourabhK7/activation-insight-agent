@@ -33,6 +33,29 @@ from tenacity import (
 from .findings import Findings
 from .prompts import build_prompt
 
+# Length hints for the funnel-diagnosis prompt when a caller passes a
+# non-"full" output_format. We keep the existing prompt as-is (it's the
+# "full" form) and prepend a short directive for the other two.
+_DIAGNOSIS_FORMAT_HINTS = {
+    "full": "",
+    "exec": (
+        "REPLACEMENT OUTPUT INSTRUCTION (overrides the section list below): "
+        "write a three-bullet exec summary under 100 words. Bullet 1: headline "
+        "with overall conversion and biggest drop-off. Bullet 2: the single "
+        "most important segment finding (or 'no material segment divergence'). "
+        "Bullet 3: the one action or next step this data enables. No headings, "
+        "no methodology detail. Every number must still come from the input."
+    ),
+    "slack": (
+        "REPLACEMENT OUTPUT INSTRUCTION (overrides the section list below): "
+        "write a Slack message, 4-8 sentences, casual but precise register. "
+        "Lead with the overall conversion and biggest drop-off, then the top "
+        "segment finding, then the top 1-2 next steps. No headings; short "
+        "paragraphs separated by blank lines. Every number must still come "
+        "from the input."
+    ),
+}
+
 DEFAULT_MODEL = "claude-sonnet-5"
 # Set generously so extended-reasoning models (Sonnet 5+) don't burn the entire
 # budget on internal thinking and return empty text. Observed: 2000 was too low.
@@ -127,32 +150,29 @@ def _call_with_retry(client: Anthropic, **kwargs):
         raise DiagnosisError(f"Anthropic API returned {e.status_code}: {e}") from e
 
 
-def diagnose(
-    findings: Findings,
+def run_llm(
+    system_prompt: str,
+    user_prompt: str,
     *,
     model: str = DEFAULT_MODEL,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     api_key: str | None = None,
 ) -> DiagnosisResult:
     """
-    Generate a written diagnosis from a Findings object.
+    Low-level: run one Anthropic API call with the given prompts, returning
+    a DiagnosisResult. Used by all the mode-specific wrappers below.
 
-    Returns a DiagnosisResult with .text (markdown) and .usage
-    (token counts + cost estimate). str(result) returns the text,
-    so callers that just want the string still work.
-
-    Raises DiagnosisError on missing API key or non-retryable API failures.
+    Handles: API key resolution, retries on transient errors, usage
+    extraction, and cost estimation.
     """
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         raise DiagnosisError(
             "No Anthropic API key found. Set the ANTHROPIC_API_KEY environment "
-            "variable or pass api_key= to diagnose()."
+            "variable or pass api_key= to the wrapper function."
         )
 
     client = Anthropic(api_key=key)
-    system_prompt, user_prompt = build_prompt(findings.to_dict())
-
     try:
         response = _call_with_retry(
             client,
@@ -179,5 +199,28 @@ def diagnose(
         output_tokens=out_tok,
         cost_usd=_estimate_cost(model, in_tok, out_tok),
     )
-
     return DiagnosisResult(text=text, usage=usage)
+
+
+def diagnose(
+    findings: Findings,
+    *,
+    model: str = DEFAULT_MODEL,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
+    api_key: str | None = None,
+    output_format: str = "full",
+) -> DiagnosisResult:
+    """
+    Generate a written funnel diagnosis from a Findings object.
+
+    `output_format`: "full" (default; multi-section markdown), "exec"
+    (three-bullet summary under 100 words), or "slack" (short prose).
+    """
+    system_prompt, user_prompt = build_prompt(findings.to_dict())
+    hint = _DIAGNOSIS_FORMAT_HINTS.get(output_format, "")
+    if hint:
+        user_prompt = hint + "\n\n" + user_prompt
+    return run_llm(
+        system_prompt, user_prompt,
+        model=model, max_tokens=max_tokens, api_key=api_key,
+    )

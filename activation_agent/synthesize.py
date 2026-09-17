@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -300,6 +300,139 @@ def generate_b2b_trial(n_users: int, seed: int = 42) -> pd.DataFrame:
         start_time = base_time + timedelta(days=offset_days, hours=rng.randint(0, 23))
         rows.extend(_generate_b2b_journey(profile, start_time, rng))
     return pd.DataFrame(rows)
+
+
+def generate_retention_data(
+    n_users: int = 20000,
+    seed: int = 42,
+    *,
+    data_pull_date: date | None = None,
+    span_days: int = 60,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Generate signup + activity data for retention analysis.
+
+    Returns (signups, activity):
+      signups: user_id, signup_date, acquisition_source, device
+      activity: user_id, timestamp (day-level events; one row per active day)
+
+    Planted patterns:
+      - Overall D1 ~ 40%, decays with a Weibull-shaped curve; D30 ~ 18%.
+      - Paid_social cohort ("acquisition_source=paid_social") has ~10pp
+        WORSE retention at D1 (activation-shaped divergence — visible
+        early, holds through D7).
+      - The most recent 30 days of the span will have partial D30 windows;
+        the returned signups include some users too young for D30 so the
+        `has_complete_window` flag has real work to do downstream.
+    """
+    from datetime import date as _date, timedelta as _td
+    rng = np.random.default_rng(seed)
+    pull = data_pull_date or _date(2026, 6, 15)
+
+    # Uniform signups across the span.
+    ages = rng.integers(0, span_days, size=n_users)
+    signup_dates = [pull - _td(days=int(a)) for a in ages]
+    user_ids = [f"ret_{i:07d}" for i in range(n_users)]
+
+    sources = rng.choice(
+        ["organic", "paid_search", "paid_social", "referral"],
+        p=[0.40, 0.30, 0.20, 0.10],
+        size=n_users,
+    )
+    devices = rng.choice(["desktop", "mobile"], p=[0.45, 0.55], size=n_users)
+
+    signups = pd.DataFrame({
+        "user_id": user_ids,
+        "signup_date": signup_dates,
+        "acquisition_source": sources,
+        "device": devices,
+    })
+
+    # Retention hazard per day. For each user, sample whether they are
+    # "active" on day-N; probability decays with N, with paid_social
+    # penalized early.
+    activity_rows: list[dict] = []
+    for uid, sdate, src in zip(user_ids, signup_dates, sources):
+        max_day = (pull - sdate).days
+        for d in range(1, max_day + 1):
+            # Base hazard: ~0.4 at d=1, ~0.18 at d=30 (Weibull-ish).
+            base = 0.5 * (0.94 ** d) + 0.05
+            if src == "paid_social" and d <= 7:
+                base -= 0.10
+            base = max(0.02, base)
+            if rng.random() < base:
+                activity_rows.append({
+                    "user_id": uid,
+                    "timestamp": sdate + _td(days=d),
+                })
+
+    activity = pd.DataFrame(activity_rows)
+    return signups, activity
+
+
+def generate_anomaly_windows(
+    seed: int = 42,
+    *,
+    aggregate_delta_pp: float = -1.5,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Generate before/after windows for anomaly decomposition.
+
+    Returns (before, after) DataFrames with columns:
+      device, acquisition_source, n, successes
+
+    Planted pattern:
+      - The overall signup rate drops by ~aggregate_delta_pp pp.
+      - The drop is a MIX effect: paid_social share of traffic doubles
+        (marketing pulse), and paid_social has a lower baseline
+        conversion rate. Per-segment rates are approximately stable.
+      - This lets the agent demonstrate distinguishing mix from rate.
+    """
+    rng = np.random.default_rng(seed)
+
+    # Baseline segment rates.
+    rates = {
+        ("desktop", "organic"): 0.045,
+        ("desktop", "paid_search"): 0.038,
+        ("desktop", "paid_social"): 0.020,
+        ("desktop", "referral"): 0.052,
+        ("mobile", "organic"): 0.032,
+        ("mobile", "paid_search"): 0.027,
+        ("mobile", "paid_social"): 0.015,
+        ("mobile", "referral"): 0.038,
+    }
+    # Before-window shares of n.
+    before_shares = {
+        ("desktop", "organic"): 0.18,
+        ("desktop", "paid_search"): 0.12,
+        ("desktop", "paid_social"): 0.05,
+        ("desktop", "referral"): 0.04,
+        ("mobile", "organic"): 0.22,
+        ("mobile", "paid_search"): 0.14,
+        ("mobile", "paid_social"): 0.15,
+        ("mobile", "referral"): 0.10,
+    }
+    # After-window: paid_social shares double, other shares scaled down.
+    after_shares = dict(before_shares)
+    after_shares[("desktop", "paid_social")] = 0.10
+    after_shares[("mobile", "paid_social")]  = 0.30
+    # Renormalize.
+    tot = sum(after_shares.values())
+    after_shares = {k: v / tot for k, v in after_shares.items()}
+
+    def _make(shares: dict, total_n: int) -> pd.DataFrame:
+        rows = []
+        for (dev, src), share in shares.items():
+            n = int(share * total_n)
+            p = rates[(dev, src)]
+            # Sample successes with a small amount of Poisson-ish noise.
+            successes = int(rng.binomial(n, p))
+            rows.append({"device": dev, "acquisition_source": src, "n": n, "successes": successes})
+        return pd.DataFrame(rows)
+
+    before = _make(before_shares, total_n=200_000)
+    after = _make(after_shares, total_n=200_000)
+    return before, after
 
 
 if __name__ == "__main__":
