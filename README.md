@@ -2,9 +2,9 @@
 
 [![test](https://github.com/SourabhK7/activation-insight-agent/actions/workflows/test.yml/badge.svg)](https://github.com/SourabhK7/activation-insight-agent/actions/workflows/test.yml)
 
-A Python analytics agent that turns raw funnel event data into a written diagnosis of where and why users are dropping off. Give it a messy CSV; get back the readout you'd otherwise spend an hour writing yourself.
+A Python analytics agent that turns raw product data into written diagnoses. Four modes: **funnel drop-off**, **retention curves**, **A/B test readouts**, and **anomaly decomposition** — each producing the readout you'd otherwise spend an hour writing.
 
-The architecture is the interesting part: **pandas owns the arithmetic, the LLM owns the narrative**, and the two never mix. That's the design decision the rest of the repo is built around, and — importantly — the one the [`evals/`](evals/) directory exists to measure rather than assert.
+The architecture is the interesting part: **pandas owns the arithmetic, the LLM owns the narrative**, and the two never mix. That's the design decision the rest of the repo is built around, and — importantly — the one the [`evals/`](evals/) directory exists to measure rather than assert. Every mode follows the same pattern: pandas computes a structured findings object, the LLM writes the diagnosis from that object without ever seeing raw data or being asked to compute a number.
 
 ---
 
@@ -86,12 +86,23 @@ python -m activation_agent run \
 
 The CLI prints token counts, an approximate USD cost, and the model used to stderr on every run, so you can see what each diagnosis costs without setting up separate instrumentation.
 
-Two other subcommands:
+Other subcommands:
 
 - `analyze` — runs only the pandas layer and prints the `Findings` JSON. No LLM call, no API key needed. Good for inspecting what the LLM would receive.
 - `generate-data --preset b2b-trial` — a differently-shaped funnel (see the B2B walkthrough).
+- `retention` — cohort retention curves + LLM narrative. Takes `--signups` and `--activity` CSVs; optional `--cohort-column` breaks out per-cohort curves. Honors `--data-pull-date` for survivorship-aware windows.
+- `ab-readout` — one-shot A/B test analyzer. Provide `--control-n --control-successes --treatment-n --treatment-successes` for a binary metric, or pass a `--spec` JSON for continuous metrics. Computes lift, 95% CI, two-sided p-value in Python; LLM writes a calibrated readout.
+- `anomaly` — rate/mix decomposition of a metric that moved. Takes `--before` and `--after` CSVs (attribute columns + `n` + `successes`) and decomposes the aggregate delta into behavior-within-segments (rate effect) vs. composition-of-segments (mix effect).
 
-Both `analyze` and `run` accept `--detection-mode threshold|statistical` (default: `threshold`). Statistical mode adds a Bonferroni-corrected two-proportion z-test on top of the magnitude gate — see the notes at the bottom of this README for what that means and when to use it.
+Every LLM-producing subcommand accepts `--format {full|exec|slack}`:
+
+- `full` (default): multi-section markdown, PM-ready.
+- `exec`: three-bullet summary, under 100 words.
+- `slack`: casual-but-precise short prose for a Slack post.
+
+Every LLM subcommand also accepts `--no-llm` to skip the API call and print the structured findings as JSON — useful for debugging, no API key needed.
+
+Both `analyze` and `run` (funnel modes) accept `--detection-mode threshold|statistical` (default: `threshold`). Statistical mode adds a Bonferroni-corrected two-proportion z-test on top of the magnitude gate — see the notes at the bottom of this README for what that means and when to use it.
 
 ---
 
@@ -140,10 +151,10 @@ See [`evals/README.md`](evals/README.md) for the rubric, methodology, and honest
 
 Being explicit about what this isn't:
 
-- **No causal inference.** The agent surfaces correlations. It does not tell you *why*. That's your job.
+- **No causal inference.** The agent surfaces correlations. It does not tell you *why*. That's your job. The A/B mode gives you a p-value and a CI; the causal interpretation is still on you (and depends on whether the design was actually randomized, whether you had SRM, etc. — the agent does not check that).
 - **No attribution modeling.** If a user has multiple acquisition sources, the row's `acquisition_source` is used as-is.
-- **No week-over-week comparison built in.** The agent treats the data as a single snapshot. Compare weeks by running it twice.
-- **No automatic action.** Produces a readout; does not file tickets, ping PMs, or update dashboards.
+- **Anomaly mode is not a monitoring system.** It decomposes a movement you already noticed; it does not detect them for you.
+- **No automatic action.** Produces readouts; does not file tickets, ping PMs, or update dashboards.
 - **Not a production service.** There's basic retry with exponential backoff on rate limits, connection errors, and 5xx (via `tenacity`), and every run reports token counts and an estimated cost. But there's no queueing, no observability, no persistent state. It's a tool for DS workflows, not a service.
 
 ---
@@ -153,14 +164,20 @@ Being explicit about what this isn't:
 ```
 activation-insight-agent/
 ├── activation_agent/
-│   ├── __main__.py                # CLI
+│   ├── __main__.py                # CLI (all subcommands)
 │   ├── funnel.py                  # step-by-step conversion math
 │   ├── cohorts.py                 # segment divergence detection
-│   ├── findings.py                # structured findings dataclass
+│   ├── retention.py               # cohort retention curves (D1/D7/D30/…)
+│   ├── ab_test.py                 # A/B two-proportion + Welch analysis
+│   ├── anomaly.py                 # rate/mix decomposition
+│   ├── findings.py                # structured findings dataclass (funnel)
 │   ├── diagnose.py                # Anthropic API call + retry + usage tracking
-│   ├── synthesize.py              # synthetic data generators (ecommerce, b2b-trial)
+│   ├── synthesize.py              # synthetic data (ecommerce, b2b-trial, retention, anomaly)
 │   └── prompts/
-│       └── diagnosis_prompt.py    # the prompt template
+│       ├── diagnosis_prompt.py    # funnel prompt (format-aware)
+│       ├── retention_prompt.py    # retention prompt (format-aware)
+│       ├── ab_readout_prompt.py   # A/B readout prompt (format-aware)
+│       └── anomaly_prompt.py      # anomaly prompt (format-aware)
 ├── data/
 │   └── sample_funnel.csv          # generated synthetic data
 ├── examples/
