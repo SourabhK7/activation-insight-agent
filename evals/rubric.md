@@ -60,7 +60,7 @@ Product DS communication requires distinguishing correlation from causation. Thi
 
 Per-run total is the sum across 6 criteria (0–12). Arm-level score is the mean and stdev of per-run totals over N runs. Report both.
 
-Report per-criterion breakdowns as well — an arm can win on total but lose on criterion 5 (numerical accuracy), which is the criterion that most directly bears on the design thesis.
+Report the per-criterion scores too. An arm can win on total and still lose on criterion 5 (numerical accuracy), which is the one that bears most directly on the design question.
 
 ## Limitations of LLM-as-judge
 
@@ -70,7 +70,9 @@ The judge is Claude. This is not a bulletproof measurement:
 - The judge is more reliable at criterion 5 (numerical, verifiable against ground truth) than at criterion 6 (calibration, which requires linguistic judgment).
 - Small N (10–20 runs per arm) means confidence intervals on the mean are wide.
 
+- Criterion 5 is only as good as the ground truth it's checked against. In the second run the judge docked correct numbers (signup-week and country rates) because they weren't in the ground-truth file. I confirmed they were right by recomputing them from the same seeds. Any number a diagnosis might report needs to be in the ground truth, or the judge will treat it as made up.
+
 Mitigations:
-- Ground truth for criteria 1-5 is programmatically derivable from the synthetic data generator, so the judge is checking against an oracle for those, not making autonomous calls.
+- Ground truth for criteria 1-5 is computed from the synthetic data generator, so for those the judge is checking against known answers rather than making its own calls.
 - Every judge output is stored in `results/raw_runs.jsonl` for auditability. If a specific score looks wrong, it's inspectable.
 - Report variance, not just means. A tight loss is a tie in this framework.

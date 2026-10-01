@@ -2,22 +2,15 @@
 
 [![test](https://github.com/SourabhK7/activation-insight-agent/actions/workflows/test.yml/badge.svg)](https://github.com/SourabhK7/activation-insight-agent/actions/workflows/test.yml)
 
-A Python analytics agent that turns raw product data into written diagnoses. Four modes: **funnel drop-off**, **retention curves**, **A/B test readouts**, and **anomaly decomposition** — each producing the readout you'd otherwise spend an hour writing.
+A Python agent that takes product data and writes up what's going on, the readout you'd otherwise spend an hour on. It has four modes: funnel drop-off, retention curves, A/B test readouts, and anomaly breakdowns.
 
-The architecture is the interesting part: **pandas owns the arithmetic, the LLM owns the narrative**, and the two never mix. That's the design decision the rest of the repo is built around, and — importantly — the one the [`evals/`](evals/) directory exists to measure rather than assert. Every mode follows the same pattern: pandas computes a structured findings object, the LLM writes the diagnosis from that object without ever seeing raw data or being asked to compute a number.
+The main design choice is that pandas does all the math and the LLM only writes. Every mode works the same way: pandas builds a structured findings object, and the LLM writes the diagnosis from that object. It never sees the raw data and is never asked to compute a number. I also tested whether that choice actually matters, and the answer surprised me (see [`evals/`](evals/) and the section below).
 
----
+## How it works
 
-## Architecture
+Python handles conversion rates, segment breakdowns, and finding cohorts that behave differently from the overall funnel. The LLM gets a `Findings` object instead of raw events and writes a diagnosis with a fixed structure: headline, funnel overview, segments, interpretation, caveats, next steps.
 
-Two layers, deliberately separated:
-
-- **Python does the math.** Conversion rates, segment breakdowns, and the search for cohorts that diverge from the overall funnel — all pandas. The LLM never sees a number it has to compute.
-- **The LLM does the writing.** It receives a structured `Findings` object, not raw events, and produces a diagnosis with a fixed structure: headline, funnel overview, segments, interpretation, caveats, next steps.
-
-I started from the common belief that LLMs are unreliable at arithmetic, so every rate the LLM computes itself is a place the pipeline could silently mislead a stakeholder. The eval below tested that belief, and a frontier model got the arithmetic right either way. The split still earns its place for a different reason: every number in the diagnosis comes from code you can inspect and test, so the output is deterministic and debuggable.
-
-The `Findings` object is inspectable: `print(findings.to_dict())` shows exactly what the LLM was given. That makes this pipeline debuggable in ways an end-to-end "here's the CSV, write me something" prompt is not.
+I started from the common belief that LLMs are unreliable at arithmetic, so every rate the LLM computes itself is a place the pipeline could quietly mislead someone. The eval tested that, and a frontier model got the arithmetic right either way. I kept the split anyway, for a different reason: every number in the diagnosis comes from code you can inspect and test, so the output is deterministic and easy to debug. `print(findings.to_dict())` shows exactly what the LLM was given, which you can't do with a "here's the CSV, write me something" prompt.
 
 ```
 funnel CSV
@@ -35,25 +28,21 @@ diagnose.py + prompts/     ← LLM sees findings, not raw data
 diagnosis.md
 ```
 
----
-
 ## Example output
 
-Running against the included synthetic funnel:
+On the included synthetic funnel:
 
 ```bash
 python -m activation_agent run --data data/sample_funnel.csv --output examples/diagnosis.md
 ```
 
-A snippet from the output:
+Part of what it wrote:
 
-> **Headline**: Of the 50,000 users who started the checkout funnel, 26% completed purchase. The biggest drop-off is between `shipping_info_entered` and `payment_info_entered` — 38% of users at that step do not continue.
+> **Headline**: Of the 50,000 users who started the checkout funnel, 26% completed purchase. The biggest drop-off is between `shipping_info_entered` and `payment_info_entered`. 38% of users at that step do not continue.
 >
-> **The mobile–desktop gap is the story.** Desktop users convert at 34% end-to-end; mobile at 19%. The gap is almost entirely at the payment step (mobile 52% completion vs. desktop 78%), which is consistent with a mobile-specific friction in the payment UI rather than a broad checkout problem.
+> **The mobile/desktop gap is the story.** Desktop users convert at 34% end to end; mobile at 19%. The gap is almost entirely at the payment step (mobile 52% completion vs. desktop 78%), which is consistent with a mobile-specific friction in the payment UI rather than a broad checkout problem.
 
-Full example: [examples/diagnosis.md](examples/diagnosis.md). A different-shaped B2B trial funnel walkthrough with subtler patterns: [examples/b2b-trial-walkthrough.md](examples/b2b-trial-walkthrough.md).
-
----
+The full output is in [examples/diagnosis.md](examples/diagnosis.md). There's also a B2B trial funnel with subtler patterns in [examples/b2b-trial-walkthrough.md](examples/b2b-trial-walkthrough.md).
 
 ## Quickstart
 
@@ -68,7 +57,7 @@ pip install -r requirements.txt
 export ANTHROPIC_API_KEY=sk-ant-...  # from console.anthropic.com
 ```
 
-Generate a synthetic funnel with known planted patterns:
+Generate a synthetic funnel with some patterns planted in it:
 
 ```bash
 python -m activation_agent generate-data \
@@ -76,7 +65,7 @@ python -m activation_agent generate-data \
     --output data/sample_funnel.csv
 ```
 
-Run the full pipeline:
+Then run it:
 
 ```bash
 python -m activation_agent run \
@@ -84,31 +73,23 @@ python -m activation_agent run \
     --output examples/diagnosis.md
 ```
 
-The CLI prints token counts, an approximate USD cost, and the model used to stderr on every run, so you can see what each diagnosis costs without setting up separate instrumentation.
+Each run prints the token counts, rough cost in USD, and model used, so you can see what a diagnosis costs.
 
-Other subcommands:
+The other subcommands:
 
-- `analyze` — runs only the pandas layer and prints the `Findings` JSON. No LLM call, no API key needed. Good for inspecting what the LLM would receive.
-- `generate-data --preset b2b-trial` — a differently-shaped funnel (see the B2B walkthrough).
-- `retention` — cohort retention curves + LLM narrative. Takes `--signups` and `--activity` CSVs; optional `--cohort-column` breaks out per-cohort curves. Honors `--data-pull-date` for survivorship-aware windows.
-- `ab-readout` — one-shot A/B test analyzer. Provide `--control-n --control-successes --treatment-n --treatment-successes` for a binary metric, or pass a `--spec` JSON for continuous metrics. Computes lift, 95% CI, two-sided p-value in Python; LLM writes a calibrated readout.
-- `anomaly` — rate/mix decomposition of a metric that moved. Takes `--before` and `--after` CSVs (attribute columns + `n` + `successes`) and decomposes the aggregate delta into behavior-within-segments (rate effect) vs. composition-of-segments (mix effect).
+- `analyze` runs only the pandas part and prints the `Findings` JSON. No LLM call and no API key needed, so it's the easiest way to see what the LLM would get.
+- `generate-data --preset b2b-trial` makes a differently shaped funnel (see the B2B walkthrough).
+- `retention` builds cohort retention curves and has the LLM write them up. It takes `--signups` and `--activity` CSVs, and `--cohort-column` if you want a curve per cohort. `--data-pull-date` handles cohorts that haven't been around long enough to measure yet.
+- `ab-readout` analyzes a finished A/B test. Pass `--control-n --control-successes --treatment-n --treatment-successes` for a conversion metric, or a `--spec` JSON for a continuous one. Python computes the lift, 95% CI and p-value, and the LLM writes the readout.
+- `anomaly` breaks down a metric that moved. Give it `--before` and `--after` CSVs (attribute columns plus `n` and `successes`) and it splits the change into segments converting differently (rate effect) versus the mix of segments changing (mix effect).
 
-Every LLM-producing subcommand accepts `--format {full|exec|slack}`:
+Anything that calls the LLM takes `--format full|exec|slack`. `full` is the default multi-section write-up, `exec` is three bullets under 100 words, and `slack` is a short message. It also takes `--no-llm`, which skips the API call and prints the findings as JSON.
 
-- `full` (default): multi-section markdown, PM-ready.
-- `exec`: three-bullet summary, under 100 words.
-- `slack`: casual-but-precise short prose for a Slack post.
+`analyze` and `run` also take `--detection-mode threshold|statistical` (default `threshold`). The statistical mode adds a significance test on top of the size threshold, explained near the bottom.
 
-Every LLM subcommand also accepts `--no-llm` to skip the API call and print the structured findings as JSON — useful for debugging, no API key needed.
+## Using your own data
 
-Both `analyze` and `run` (funnel modes) accept `--detection-mode threshold|statistical` (default: `threshold`). Statistical mode adds a Bonferroni-corrected two-proportion z-test on top of the magnitude gate — see the notes at the bottom of this README for what that means and when to use it.
-
----
-
-## Using it on your own data
-
-The agent expects a CSV with these three columns:
+You need a CSV with three columns:
 
 | column | type | description |
 |---|---|---|
@@ -116,9 +97,9 @@ The agent expects a CSV with these three columns:
 | `step_name` | string | which funnel step this row represents |
 | `timestamp` | ISO datetime | when the step happened |
 
-Any additional columns are treated as user attributes and used for cohort breakdowns — `device`, `acquisition_source`, `country`, `signup_date`, `plan_tier`, whatever you have. More attributes = richer cohort analysis, but beyond ~8 dimensions you start getting thin segments and noisy conclusions.
+Any other columns are treated as user attributes and used for cohort breakdowns: `device`, `acquisition_source`, `country`, `signup_date`, `plan_tier`, whatever you have. More attributes give you more to look at, but past about 8 you start getting thin segments and noisy conclusions.
 
-You also tell the agent the order of funnel steps:
+You also give it the step order:
 
 ```bash
 python -m activation_agent run \
@@ -127,37 +108,29 @@ python -m activation_agent run \
     --output diagnosis.md
 ```
 
----
+## Does doing the math in pandas actually matter?
 
-## Does the design assumption hold?
+I could test this, so I did. [`evals/`](evals/) runs both approaches on the same synthetic data: one gives the LLM the structured findings, the other gives it aggregated counts and lets it compute the rates itself. An LLM judge scores both against a six-criterion rubric, and one of the criteria is numerical accuracy.
 
-The claim that pre-computing rates in pandas is better than letting the LLM do the arithmetic is testable, so I tested it. The [`evals/`](evals/) directory contains an A/B evaluation: same synthetic data, two prompt strategies (structured findings vs. aggregated counts with the LLM computing rates itself), scored by an LLM judge against a six-criterion rubric that includes numerical accuracy explicitly.
+I ran it twice with Sonnet 5. In the first run both versions scored 2.00/2.00 on numerical accuracy. In the second, the judge gave the naive version 1.33. I went back and recomputed every number it had marked down from the same seeds, and they were all right: signup-week conversion, the CX country rates, all of it. The judge had docked numbers that weren't in its answer key, not numbers that were wrong. So "the LLM will quietly get the math wrong" didn't hold up. The naive version also scored higher overall in both runs (11.75 vs 7.33, then 10.50 vs 6.00, on the runs the judge managed to score) because its longer diagnoses picked up more of the planted patterns.
 
-**The result was surprising.** On this task with Sonnet 5, both arms scored 2.00/2.00 (perfect) on numerical accuracy. The narrow "LLMs will silently produce wrong numbers" claim is not supported by measurement — the reasoning model handles the arithmetic. The naive baseline also scored higher on total (11.75 vs 7.33) when the judge succeeded, because its longer diagnoses surfaced more of the planted patterns.
+I still think the structured design is the right one. It's more predictable, it's cheaper because the prompts are shorter, and you can inspect exactly what the model was given. But the reason is determinism and debuggability, not protection from arithmetic mistakes.
 
-The structured design is still worth keeping — it's more predictable, cheaper (shorter prompts, less reasoning cost), and the intermediate `Findings` object is inspectable in a way an end-to-end prompt is not. But the pitch changes: **the value is determinism and debuggability, not protection against arithmetic errors on frontier models**.
-
-Full write-up with per-criterion scores, caveats, and raw per-run data: [`evals/results/latest.md`](evals/results/latest.md). To reproduce:
+The full write-up with per-criterion scores, caveats and raw data is in [`evals/results/latest.md`](evals/results/latest.md). To rerun it:
 
 ```bash
 python evals/run_eval.py --n 10
 ```
 
-See [`evals/README.md`](evals/README.md) for the rubric, methodology, and honest limitations of LLM-as-judge on this kind of task.
+[`evals/README.md`](evals/README.md) has the rubric, the method, and the limits of using an LLM as the judge here.
 
----
+## What it doesn't do
 
-## Scope
-
-Being explicit about what this isn't:
-
-- **No causal inference.** The agent surfaces correlations. It does not tell you *why*. That's your job. The A/B mode gives you a p-value and a CI; the causal interpretation is still on you (and depends on whether the design was actually randomized, whether you had SRM, etc. — the agent does not check that).
-- **No attribution modeling.** If a user has multiple acquisition sources, the row's `acquisition_source` is used as-is.
-- **Anomaly mode is not a monitoring system.** It decomposes a movement you already noticed; it does not detect them for you.
-- **No automatic action.** Produces readouts; does not file tickets, ping PMs, or update dashboards.
-- **Not a production service.** There's basic retry with exponential backoff on rate limits, connection errors, and 5xx (via `tenacity`), and every run reports token counts and an estimated cost. But there's no queueing, no observability, no persistent state. It's a tool for DS workflows, not a service.
-
----
+- It doesn't do causal inference. It finds correlations, and the "why" is still up to you. The A/B mode gives you a p-value and a CI, but whether you can read it causally depends on whether the test was really randomized, whether there was a sample ratio mismatch, and so on. The agent doesn't check that.
+- No attribution modeling. If a user came through several channels, it uses whatever `acquisition_source` is on the row.
+- Anomaly mode won't find anomalies for you. It explains a movement you've already noticed.
+- It only writes readouts. It doesn't file tickets, ping anyone, or update dashboards.
+- It's not a production service. It retries with backoff on rate limits, connection errors and 5xx (via `tenacity`), and reports token counts and cost, but there's no queueing, monitoring or stored state.
 
 ## Repo layout
 
@@ -183,24 +156,18 @@ activation-insight-agent/
 ├── examples/
 │   ├── diagnosis.md               # example output (e-commerce funnel)
 │   └── b2b-trial-walkthrough.md   # different funnel shape, subtler patterns
-├── evals/                         # A/B evaluation harness for the design decision
+├── evals/                         # the A/B eval of the pandas-vs-LLM math question
 └── tests/
 ```
 
----
+## A few design notes
 
-## Notes on some of the choices
+Why a `Findings` object instead of handing the LLM the CSV? Raw event data won't fit in a prompt for any real funnel, and with a structured object you can see exactly what the LLM got and unit-test every number in it.
 
-**Why a structured `Findings` object instead of passing raw CSV to the LLM?** Raw event data doesn't fit in a prompt for any real funnel, and a structured intermediate is inspectable: `findings.to_dict()` shows exactly what the LLM was given, and every number can be unit-tested.
+How segments get flagged. By default (`--detection-mode threshold`) a segment is flagged if its conversion differs from the rest by more than 4 points and it has over 500 users. That's simple and easy to explain in the write-up. `--detection-mode statistical` also runs a two-proportion z-test against the rest of the population and requires the p-value to clear a Bonferroni-corrected alpha (alpha divided by the number of segments big enough to test). It can only remove segments, never add them, so turning it on can't make things noisier. At worst the diagnosis gets shorter.
 
-**Threshold vs. statistical detection of divergent segments.** Two modes ship. The default (`--detection-mode threshold`) uses `|segment_rate − overall_rate| > 4pp AND segment_n > 500` — simple, easy to explain in the diagnosis, hard to misuse. The opt-in `--detection-mode statistical` mode adds a two-proportion z-test between the segment and the rest of the population and requires the resulting p-value to clear a Bonferroni-corrected alpha (alpha / N, where N is the total count of size-passing segments scanned in the call). Statistical mode never flags *more* segments than threshold mode — it can only remove candidates that fail significance. That makes it safe to enable: worst case, the diagnosis gets shorter.
+Why synthetic data? Event-level funnel data with a permissive license is hard to find, and synthetic data lets me plant patterns I know are there. That's the only way to check whether the agent finds what's really in the data rather than making up a story.
 
-**Why synthetic data?** Public event-level funnel data with permissive licensing is hard to come by, and synthesizing lets you plant known patterns. Planting known patterns means you can check whether the agent surfaces what's actually there instead of inventing stories from noise. Real data would not allow this check.
+Why Sonnet as the default? It's the right cost for writing from clean structured input. This doesn't need the strongest model, Opus is overkill, and Haiku tended to hedge too much.
 
-**Why Claude Sonnet as the default?** Quality-cost fit for narrative generation from structured input. The task doesn't need frontier reasoning; it needs reliable prose from a clean schema. Opus is overkill; Haiku sometimes over-hedges.
-
----
-
-## Author
-
-Sourabh Koul — Data Scientist, San Jose CA. [LinkedIn](https://www.linkedin.com/in/sourabhkoul/) · [GitHub](https://github.com/SourabhK7)
+Sourabh Koul · [LinkedIn](https://www.linkedin.com/in/sourabhkoul/) · [GitHub](https://github.com/SourabhK7)

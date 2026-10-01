@@ -3,48 +3,50 @@
 Generated: 2026-07-23 20:04 UTC
 Runs per arm: 10 planned (seed base: 1000)
 Diagnosis model: claude-sonnet-5 · Judge model: claude-sonnet-5
-Second evaluation run, after the vs-rest delta and `underperforming_steps` fix landed (commit 69fe405).
+This is the second run, after the vs-rest delta and `underperforming_steps` fix (commit 69fe405).
 
-## Aggregate scores (0–12 per run)
+## Aggregate scores (0 to 12 per run)
 
 | Arm | N scored | N judge-failed | Mean total | Stdev |
 |---|---:|---:|---:|---:|
 | structured | 2 | 8 | 6.00 | 1.41 |
 | naive | 6 | 4 | 10.50 | 1.38 |
 
-## Per-criterion mean scores (0–2)
+## Per-criterion mean scores (0 to 2)
 
 | Arm | c1 mobile→payment | c2 paid-social→cart | c3 CX region | c4 no-fabrication | c5 numerical | c6 calibrated |
 |---|---:|---:|---:|---:|---:|---:|
 | structured | **0.00** | 0.50 | **0.00** | 1.50 | 2.00 | 2.00 |
 | naive | 2.00 | 2.00 | 2.00 | 1.17 | 1.33 | 2.00 |
 
-## What the numbers actually say
+For comparison, the first run (commit abed816) had structured at 7.33 and naive at 11.75, with both at 2.00 on c5.
 
-**The fix I made didn't move c1.** The structured arm still scores 0.00 on "correctly identifies the mobile-payment issue," same as run #1. The vs-rest delta fix and the `underperforming_steps` field both landed and function as designed — the diagnosis now correctly calls out mobile as the underperforming segment, rather than framing it as "desktop's advantage at shipping." But the eval still marks the answer as missing the pattern.
+## What happened
 
-Digging into the raw runs revealed why. The structured arm's diagnosis says something like "mobile users have a 34pp lower conversion at the shipping step." The eval's ground truth, which I wrote, expects the finding labeled at the payment step. These describe the same event from opposite sides of the shipping→payment transition. Both are accurate. The judge sees two different words and marks the answer as wrong.
+The fix didn't move c1. The structured version still scores 0.00 on finding the mobile payment problem, same as the first run. The fix itself worked: the diagnosis now names mobile as the segment that's underperforming, instead of describing it as desktop doing better at shipping. The eval still marks it as missing.
 
-**This is a labeling divergence between the pipeline and the eval rubric, not a code bug in either.** The pipeline's `step_conversion` at step X is defined as "fraction of users at X who continued to X+1," so a deficit shows up at the step where users *were*. The judge's rubric expects the deficit named by the step users *failed to reach*. Both are legitimate conventions. Nothing in either component makes it obvious you'd have to align them until an eval starts scoring zero for reasons that aren't really about the answer.
+When I read the raw runs, the reason was a naming mismatch. The structured diagnosis says something like "mobile users have a 34pp lower conversion at the shipping step." The ground truth I wrote expects the problem to be named at the payment step. Those describe the same drop from opposite sides of the shipping to payment transition, and both are accurate, but the judge sees different step names and marks it wrong.
 
-Fixing it is a one-commit change (either update the pipeline to name transitions as `from_step → to_step` explicitly, or adjust the rubric to accept either label). Once aligned, c1 should move.
+The pipeline defines `step_conversion` at step X as the share of users at X who made it to X+1, so a drop shows up at the step users were on. The rubric names it by the step they failed to reach. Either convention is fine. Nothing made it obvious they had to match until the eval kept scoring zero for reasons that had nothing to do with whether the answer was right. Fixing it is one small change: either have the pipeline name transitions as `from_step → to_step`, or have the rubric accept both.
 
-**Naive arm still wins on scored runs.** When the judge can score it, the naive baseline produces thorough diagnoses that identify all three planted patterns (c1, c2, c3 all at 2.00). The judge failure rate at 4/10 is non-trivial but manageable. Interpretation of the mean total (10.50) should account for the possibility that harder-to-score diagnoses are systematically not being scored.
+The naive version's lower c5 (1.33) isn't real either. I regenerated the data for every docked run and recomputed the numbers it was marked down for. All of them were correct. For seed 1002, for example, it reported signup-week conversion of 16.5%, 16.0%, 15.1% and 14.4%, and landing to product conversion going from 74.0% to 67.2%, and those are exactly the real values. The judge marked them as fabricated because they weren't in its ground-truth file, which only covers what the structured pipeline computes. This is the same kind of problem as c1: the rubric says "verify against ground truth," and the ground truth was missing things.
 
-**Structured arm's judge failure rate (8/10) is a concern in its own right.** Bumping judge max_tokens from 4000 to 8000 in the previous iteration helped less than expected. Worth investigating whether the new `underperforming_steps` field made the structured arm's output somehow harder for the judge to grade, or whether this is just small-N variance.
+When the judge could score it, the naive version found all three planted patterns (c1, c2 and c3 all at 2.00). It failed to score 4 of 10 naive runs, which isn't great, and if harder-to-grade diagnoses are the ones failing, the 10.50 could be biased.
 
-## Two large caveats
+The structured version had 8 of 10 judge failures, which is its own problem. Raising the judge's max_tokens from 4000 to 8000 last time helped less than I expected. It might be something about the new `underperforming_steps` output, or it might just be small-N noise.
 
-**N is very small and unequal.** Structured has 2 scored runs; naive has 6. Total-score comparisons across arms at these N's are directional at best, not defensible as headline claims.
+## Caveats
 
-**One judge, one model family.** Both the arms producing diagnoses and the judge scoring them are Sonnet 5. LLM-as-judge shares training data with the arms being scored, which introduces correlated blind spots. See `../rubric.md` for the fuller limitations list.
+N is very small and uneven: 2 scored runs for structured and 6 for naive. Comparing totals across the two at these sizes is directional at best.
 
-## What this means for the repo
+The same model writes the diagnoses and grades them (Sonnet 5), so they likely share blind spots. More in `../rubric.md`.
 
-The `Findings` → LLM narrative design is still the right structure. The fix landed correctly at the analysis layer, and the pipeline now surfaces the actionable segment. What needs work is either the labeling convention (align pipeline output with the vocabulary the rubric uses) or the rubric itself (accept both labelings). Both are small changes.
+## What this means
 
-The current c1 = 0.00 result is a false failure caused by a vocabulary mismatch between two components I built, not evidence the pipeline is producing wrong diagnoses. That's a subtle failure mode worth naming: when you build an eval for your own system, the eval and the system have to agree on what to call things, or the eval will report failures that aren't really about correctness.
+I'd keep the `Findings` → LLM structure. The fix works at the analysis layer, and the pipeline now surfaces the segment you'd act on. What needs work is the eval: the rubric and the pipeline need to agree on step names, and the numerical-accuracy check needs a ground truth that covers every number a diagnosis might report.
+
+The broader lesson: when you build an eval for your own system, the eval and the system have to agree on what to call things and what counts as checkable, or the eval reports failures that aren't about correctness at all. Both of the low scores in this run turned out to be that.
 
 ## Raw runs
 
-`results/raw_runs.jsonl` — one JSON line per (arm, seed) run with the full diagnosis text, judge scorecard, per-criterion reason strings, token counts, and duration. Every score in the tables above is auditable there.
+`results/raw_runs.jsonl` has one line per (arm, seed) run with the full diagnosis, the judge's scores, its reason for each criterion, token counts and duration.

@@ -1,11 +1,11 @@
 # Evaluation results
 
-This directory is populated by `python evals/run_eval.py`.
+`python evals/run_eval.py` writes these files.
 
-- `latest.md` — human-readable aggregate summary from the most recent run.
-- `raw_runs.jsonl` — one line per (arm, seed) run, containing the full diagnosis text, per-criterion scores, and judge reasons. Auditable — if a specific score looks wrong, open the file and inspect the row.
+- `latest.md` is the readable summary of the most recent run.
+- `raw_runs.jsonl` has one line per (arm, seed) run with the full diagnosis, the score for each criterion, and the judge's reasons. If a score looks wrong, you can open the file and check that row.
 
-Both files are checked in so results are visible without running the harness. To regenerate:
+Both are checked in so you can see the results without running anything. To regenerate:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
