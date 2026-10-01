@@ -15,7 +15,7 @@ Two layers, deliberately separated:
 - **Python does the math.** Conversion rates, segment breakdowns, and the search for cohorts that diverge from the overall funnel — all pandas. The LLM never sees a number it has to compute.
 - **The LLM does the writing.** It receives a structured `Findings` object, not raw events, and produces a diagnosis with a fixed structure: headline, funnel overview, segments, interpretation, caveats, next steps.
 
-The split isn't arbitrary. LLMs are unreliable at arithmetic and reliable at prose; every conversion rate the LLM computes itself is a place the pipeline can silently lie to a stakeholder. Moving arithmetic to pandas removes that entire class of failure.
+I started from the common belief that LLMs are unreliable at arithmetic, so every rate the LLM computes itself is a place the pipeline could silently mislead a stakeholder. The eval below tested that belief, and a frontier model got the arithmetic right either way. The split still earns its place for a different reason: every number in the diagnosis comes from code you can inspect and test, so the output is deterministic and debuggable.
 
 The `Findings` object is inspectable: `print(findings.to_dict())` shows exactly what the LLM was given. That makes this pipeline debuggable in ways an end-to-end "here's the CSV, write me something" prompt is not.
 
@@ -191,7 +191,7 @@ activation-insight-agent/
 
 ## Notes on some of the choices
 
-**Why a structured `Findings` object instead of passing raw CSV to the LLM?** Because the LLM would then have to compute aggregates, which it does unreliably. A structured intermediate also keeps the prompt small enough to stay well under context limits on huge funnels.
+**Why a structured `Findings` object instead of passing raw CSV to the LLM?** Raw event data doesn't fit in a prompt for any real funnel, and a structured intermediate is inspectable: `findings.to_dict()` shows exactly what the LLM was given, and every number can be unit-tested.
 
 **Threshold vs. statistical detection of divergent segments.** Two modes ship. The default (`--detection-mode threshold`) uses `|segment_rate − overall_rate| > 4pp AND segment_n > 500` — simple, easy to explain in the diagnosis, hard to misuse. The opt-in `--detection-mode statistical` mode adds a two-proportion z-test between the segment and the rest of the population and requires the resulting p-value to clear a Bonferroni-corrected alpha (alpha / N, where N is the total count of size-passing segments scanned in the call). Statistical mode never flags *more* segments than threshold mode — it can only remove candidates that fail significance. That makes it safe to enable: worst case, the diagnosis gets shorter.
 
